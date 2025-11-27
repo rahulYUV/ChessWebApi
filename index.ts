@@ -97,12 +97,19 @@ app.get("/player/:id/full", async (req: Request, res: Response) => {
         if (!id) {
             return res.status(400).json({ error: "Player ID is required" });
         }
-        const [player, stats, clubs, history] = await Promise.all([
-            chessAPI.getPlayer(id),
-            chessAPI.getPlayerStats(id),
-            chessAPI.getPlayerClubs(id),
-            getRatingHistory(id)
-        ]);
+
+        // Fetch sequentially to avoid rate limiting
+        const player = await chessAPI.getPlayer(id);
+        const stats = await chessAPI.getPlayerStats(id);
+
+        let clubs = { body: { clubs: [] } };
+        try {
+            clubs = await chessAPI.getPlayerClubs(id);
+        } catch (e) {
+            console.warn(`Failed to fetch clubs for ${id}`, e);
+        }
+
+        const history = await getRatingHistory(id);
 
         const combined = {
             ...player.body,
@@ -189,12 +196,17 @@ app.get("/compare/:p1/:p2", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Both player IDs are required" });
         }
 
-        const [p1Data, p2Data, p1History, p2History] = await Promise.all([
-            Promise.all([chessAPI.getPlayer(p1), chessAPI.getPlayerStats(p1)]),
-            Promise.all([chessAPI.getPlayer(p2), chessAPI.getPlayerStats(p2)]),
-            getRatingHistory(p1),
-            getRatingHistory(p2)
-        ]);
+        // Fetch sequentially
+        const p1Profile = await chessAPI.getPlayer(p1);
+        const p1Stats = await chessAPI.getPlayerStats(p1);
+        const p1History = await getRatingHistory(p1);
+
+        const p2Profile = await chessAPI.getPlayer(p2);
+        const p2Stats = await chessAPI.getPlayerStats(p2);
+        const p2History = await getRatingHistory(p2);
+
+        const p1Data = [p1Profile, p1Stats];
+        const p2Data = [p2Profile, p2Stats];
 
         // Merge history
         const historyMap = new Map<string, { date: string, player1?: number, player2?: number }>();
