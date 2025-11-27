@@ -22,7 +22,11 @@ function GitHubIcon() {
     );
 }
 
-export default function FloatingDockDemo() {
+interface FloatingDockDemoProps {
+    onPlayerSelect?: (username: string) => void;
+}
+
+export default function FloatingDockDemo({ onPlayerSelect }: FloatingDockDemoProps) {
     const links = [
         {
             title: "k1_rahul",
@@ -33,7 +37,7 @@ export default function FloatingDockDemo() {
                     alt="k1_rahul"
                 />
             ),
-            href: "https://www.chess.com/member/k1_rahul",
+            onClick: () => onPlayerSelect?.("k1_rahul"),
         },
         {
             title: "Magnus Carlsen",
@@ -44,7 +48,7 @@ export default function FloatingDockDemo() {
                     alt="Magnus Carlsen"
                 />
             ),
-            href: "https://www.chess.com/member/magnuscarlsen",
+            onClick: () => onPlayerSelect?.("magnuscarlsen"),
         },
         {
             title: "Hikaru Nakamura",
@@ -55,7 +59,7 @@ export default function FloatingDockDemo() {
                     alt="Hikaru Nakamura"
                 />
             ),
-            href: "https://www.chess.com/member/hikaru",
+            onClick: () => onPlayerSelect?.("hikaru"),
         },
         {
             title: "Fabiano Caruana",
@@ -66,7 +70,7 @@ export default function FloatingDockDemo() {
                     alt="Fabiano Caruana"
                 />
             ),
-            href: "https://www.chess.com/member/fabianocaruana",
+            onClick: () => onPlayerSelect?.("fabianocaruana"),
         },
         {
             title: "Praggnanandhaa",
@@ -77,7 +81,7 @@ export default function FloatingDockDemo() {
                     alt="Praggnanandhaa"
                 />
             ),
-            href: "https://www.chess.com/member/rpragchess",
+            onClick: () => onPlayerSelect?.("rpragchess"),
         },
         {
             title: "Gukesh D",
@@ -88,7 +92,7 @@ export default function FloatingDockDemo() {
                     alt="Gukesh D"
                 />
             ),
-            href: "https://www.chess.com/member/gukeshdommaraju",
+            onClick: () => onPlayerSelect?.("gukeshdommaraju"),
         },
         {
             title: "Samay Raina",
@@ -99,7 +103,7 @@ export default function FloatingDockDemo() {
                     alt="Samay Raina"
                 />
             ),
-            href: "https://www.chess.com/member/samayraina",
+            onClick: () => onPlayerSelect?.("samayraina"),
         },
         {
             title: "Star on GitHub",

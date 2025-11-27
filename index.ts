@@ -18,6 +18,26 @@ const handleError = (res: Response, error: any) => {
     res.status(statusCode).json({ error: message });
 };
 
+const formatTimestamp = (ts: number) => {
+    return new Date(ts * 1000).toLocaleString();
+};
+
+const processData = (data: any): any => {
+    if (Array.isArray(data)) {
+        return data.map(processData);
+    } else if (typeof data === 'object' && data !== null) {
+        const newData: any = {};
+        for (const key in data) {
+            newData[key] = processData(data[key]);
+            if (['date', 'joined', 'last_online'].includes(key) && typeof data[key] === 'number') {
+                newData[`${key}_formatted`] = formatTimestamp(data[key]);
+            }
+        }
+        return newData;
+    }
+    return data;
+};
+
 app.get("/", (req: Request, res: Response) => {
     res.json({
         message: "Chess Stats API",
@@ -25,6 +45,9 @@ app.get("/", (req: Request, res: Response) => {
         endpoints: {
             player: "/player/:id",
             stats: "/player/:id/stats",
+            full: "/player/:id/full",
+            clubs: "/player/:id/clubs",
+            matches: "/player/:id/matches",
             health: "/health"
         }
     });
@@ -41,7 +64,7 @@ app.get("/player/:id", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Player ID is required" });
         }
         const player = await chessAPI.getPlayer(id);
-        res.json(player.body);
+        res.json(processData(player.body));
     } catch (error) {
         handleError(res, error);
     }
@@ -54,7 +77,57 @@ app.get("/player/:id/stats", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Player ID is required" });
         }
         const stats = await chessAPI.getPlayerStats(id);
-        res.json(stats.body);
+        res.json(processData(stats.body));
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.get("/player/:id/full", async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        if (!id) {
+            return res.status(400).json({ error: "Player ID is required" });
+        }
+        const [player, stats, clubs] = await Promise.all([
+            chessAPI.getPlayer(id),
+            chessAPI.getPlayerStats(id),
+            chessAPI.getPlayerClubs(id)
+        ]);
+
+        const combined = {
+            ...player.body,
+            stats: stats.body,
+            clubs: clubs.body.clubs
+        };
+
+        res.json(processData(combined));
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.get("/player/:id/clubs", async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        if (!id) {
+            return res.status(400).json({ error: "Player ID is required" });
+        }
+        const clubs = await chessAPI.getPlayerClubs(id);
+        res.json(processData(clubs.body));
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.get("/player/:id/matches", async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        if (!id) {
+            return res.status(400).json({ error: "Player ID is required" });
+        }
+        const matches = await chessAPI.getPlayerCurrentDailyChess(id);
+        res.json(processData(matches.body));
     } catch (error) {
         handleError(res, error);
     }
