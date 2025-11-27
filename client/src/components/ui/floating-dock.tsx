@@ -15,14 +15,16 @@ export const FloatingDock = ({
     items,
     desktopClassName,
     mobileClassName,
+    size = "large",
 }: {
     items: { title: string; icon: React.ReactNode; href?: string; onClick?: () => void }[];
     desktopClassName?: string;
     mobileClassName?: string;
+    size?: "large" | "small";
 }) => {
     return (
         <>
-            <FloatingDockDesktop items={items} className={desktopClassName} />
+            <FloatingDockDesktop items={items} className={desktopClassName} size={size} />
             <FloatingDockMobile items={items} className={mobileClassName} />
         </>
     );
@@ -101,9 +103,11 @@ const FloatingDockMobile = ({
 const FloatingDockDesktop = ({
     items,
     className,
+    size,
 }: {
     items: { title: string; icon: React.ReactNode; href?: string; onClick?: () => void }[];
     className?: string;
+    size: "large" | "small";
 }) => {
     let mouseX = useMotionValue(Infinity);
     return (
@@ -111,12 +115,13 @@ const FloatingDockDesktop = ({
             onMouseMove={(e) => mouseX.set(e.pageX)}
             onMouseLeave={() => mouseX.set(Infinity)}
             className={cn(
-                "mx-auto hidden h-32 items-end gap-4 rounded-full bg-white/80 backdrop-blur-md border border-white/20 px-4 pb-3 md:flex dark:bg-neutral-900/80 dark:border-neutral-800",
+                "mx-auto hidden items-end gap-4 rounded-full bg-white/80 backdrop-blur-md border border-white/20 px-4 pb-3 md:flex dark:bg-neutral-900/80 dark:border-neutral-800",
+                size === "large" ? "h-32" : "h-24",
                 className,
             )}
         >
             {items.map((item) => (
-                <IconContainer mouseX={mouseX} key={item.title} {...item} />
+                <IconContainer mouseX={mouseX} key={item.title} {...item} size={size} />
             ))}
         </motion.div>
     );
@@ -128,12 +133,14 @@ function IconContainer({
     icon,
     href,
     onClick,
+    size,
 }: {
     mouseX: MotionValue;
     title: string;
     icon: React.ReactNode;
     href?: string;
     onClick?: () => void;
+    size: "large" | "small";
 }) {
     let ref = useRef<HTMLDivElement>(null);
 
@@ -143,14 +150,19 @@ function IconContainer({
         return val - bounds.x - bounds.width / 2;
     });
 
-    let widthTransform = useTransform(distance, [-150, 0, 150], [80, 140, 80]);
-    let heightTransform = useTransform(distance, [-150, 0, 150], [80, 140, 80]);
+    const baseWidth = size === "large" ? 80 : 50;
+    const hoverWidth = size === "large" ? 140 : 90;
+    const baseIcon = size === "large" ? 40 : 25;
+    const hoverIcon = size === "large" ? 70 : 45;
 
-    let widthTransformIcon = useTransform(distance, [-150, 0, 150], [40, 70, 40]);
+    let widthTransform = useTransform(distance, [-150, 0, 150], [baseWidth, hoverWidth, baseWidth]);
+    let heightTransform = useTransform(distance, [-150, 0, 150], [baseWidth, hoverWidth, baseWidth]);
+
+    let widthTransformIcon = useTransform(distance, [-150, 0, 150], [baseIcon, hoverIcon, baseIcon]);
     let heightTransformIcon = useTransform(
         distance,
         [-150, 0, 150],
-        [40, 70, 40],
+        [baseIcon, hoverIcon, baseIcon],
     );
 
     let width = useSpring(widthTransform, {

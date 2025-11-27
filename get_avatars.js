@@ -9,7 +9,14 @@ const players = [
     'rpragchess',
     'gukeshdommaraju',
     'samayraina',
-    'k1_rahul'
+    'k1_rahul',
+    'GothamChess',
+    'ashwin1899',
+    'YuzvendraChahal',
+    'Wizard_goat',
+    'shivasaurabh',
+    'alexandrabotez',
+    'viditchess'
 ];
 
 async function getAvatars() {

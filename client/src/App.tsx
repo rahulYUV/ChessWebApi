@@ -137,7 +137,7 @@ function App() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
             <Input
               type="text"
-              placeholder="Username 1"
+              placeholder={mode === 'compare' ? "Username 1" : "Enter Chess.com username (e.g. praggnanandhaa)"}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               onKeyPress={handleKeyPress}
@@ -379,7 +379,7 @@ function App() {
             <FloatingDockDemo onPlayerSelect={handlePlayerSelect} />
           </div>
 
-          <div className="flex flex-col gap-4 items-end">
+          <div className="flex flex-col gap-2 items-end">
             <AvatarGroupPopularityIndicatorDemo />
             <FeedbackForm />
           </div>

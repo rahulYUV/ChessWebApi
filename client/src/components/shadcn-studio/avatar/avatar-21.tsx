@@ -16,12 +16,6 @@ const avatars = [
         fallback: 'HR',
         name: 'Hallie Richards'
     }
-    // },
-    // {
-    //     src: 'https://cdn.shadcnstudio.com/ss-assets/avatar/avatar-16.png',
-    //     fallback: 'JW',
-    //     name: 'Jenny Wilson'
-    // }
 ]
 
 const AvatarGroupPopularityIndicatorDemo = () => {
