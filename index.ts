@@ -17,7 +17,7 @@ const chessAPI = new ChessWebAPI();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB Connection
+
 const MONGODB_URI = process.env.MONGODB_URI || "";
 
 if (!MONGODB_URI) {
@@ -28,7 +28,6 @@ if (!MONGODB_URI) {
         .catch((err) => console.error("MongoDB connection error:", err));
 }
 
-// Comment Schema
 const commentSchema = new mongoose.Schema({
     text: { type: String, required: true },
     createdAt: { type: Date, default: Date.now }
@@ -43,15 +42,13 @@ app.post("/comments", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Comment is required" });
         }
 
-        // 1. Save to MongoDB
+
         const newComment = new Comment({ text: comment });
         await newComment.save();
 
-        // 2. Save to comment.txt (Local File)
         const logEntry = `${new Date().toISOString()}: ${comment}\n`;
         const filePath = path.join(__dirname, "comment.txt");
 
-        // We use appendFile asynchronously but don't await it to avoid blocking response
         fs.appendFile(filePath, logEntry, (err) => {
             if (err) console.error("Error writing to local file:", err);
         });
@@ -104,7 +101,7 @@ app.get("/", (req: Request, res: Response) => {
         }
     });
 });
-
+// chech all endpoints 
 app.get("/health", (req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
@@ -121,7 +118,7 @@ app.get("/player/:id", async (req: Request, res: Response) => {
         handleError(res, error);
     }
 });
-
+// player stats 
 app.get("/player/:id/stats", async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
@@ -142,7 +139,7 @@ app.get("/player/:id/stats", async (req: Request, res: Response) => {
         handleError(res, error);
     }
 });
-
+// player full data 
 app.get("/player/:id/full", async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
@@ -150,6 +147,7 @@ app.get("/player/:id/full", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Player ID is required" });
         }
 
+        // player data 
         // Fetch sequentially to avoid rate limiting
         const player = await chessAPI.getPlayer(id);
         const stats = await chessAPI.getPlayerStats(id);
@@ -208,7 +206,7 @@ const getRatingHistory = async (username: string) => {
         const monthlyArchives = archives.body.archives;
         if (!monthlyArchives || monthlyArchives.length === 0) return [];
 
-        // Get last 12 months
+        // get the 12 months of data
         const last12 = monthlyArchives.slice(-12);
 
         const history = await Promise.all(last12.map(async (url: string) => {
@@ -216,15 +214,15 @@ const getRatingHistory = async (username: string) => {
                 const res = await fetch(url);
                 const data = await res.json();
                 const games = data.games || [];
-                // Filter for rapid games
+                // rapid games 
                 const rapidGames = games.filter((g: any) => g.rules === 'chess' && g.time_class === 'rapid');
                 if (rapidGames.length === 0) return null;
 
-                // Get the last game of the month
+                // last months data 
                 const lastGame = rapidGames[rapidGames.length - 1];
                 const isWhite = lastGame.white.username.toLowerCase() === username.toLowerCase();
                 const rating = isWhite ? lastGame.white.rating : lastGame.black.rating;
-                // Normalize date to YYYY-MM-01 for easier comparison
+                // Normalize date 
                 const dateObj = new Date(lastGame.end_time * 1000);
                 const date = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-01`;
 
@@ -248,7 +246,7 @@ app.get("/compare/:p1/:p2", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Both player IDs are required" });
         }
 
-        // Fetch sequentially
+        // Fetch sequentially to avoid rate limit
         const p1Profile = await chessAPI.getPlayer(p1);
         const p1Stats = await chessAPI.getPlayerStats(p1);
         const p1History = await getRatingHistory(p1);
@@ -260,7 +258,7 @@ app.get("/compare/:p1/:p2", async (req: Request, res: Response) => {
         const p1Data = [p1Profile, p1Stats];
         const p2Data = [p2Profile, p2Stats];
 
-        // Merge history
+
         const historyMap = new Map<string, { date: string, player1?: number, player2?: number }>();
 
         p1History.forEach((h: any) => {
@@ -275,7 +273,7 @@ app.get("/compare/:p1/:p2", async (req: Request, res: Response) => {
 
         const mergedHistory = Array.from(historyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-        // Forward fill logic
+
         let lastP1: number | undefined = undefined;
         let lastP2: number | undefined = undefined;
 
