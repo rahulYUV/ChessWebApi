@@ -38,7 +38,13 @@ export interface PlayerData {
     player1?: PlayerData;
     player2?: PlayerData;
     activity?: any;
+    dailyActivity?: { date: string; count: number }[];
     openings?: any;
+    colorStats?: {
+        white: { wins: number; loss: number; draw: number; total: number };
+        black: { wins: number; loss: number; draw: number; total: number };
+    };
+    summary?: { wins: number; loss: number; draw: number; total: number };
     history?: { date: string; rating: number }[];
     [key: string]: any;
 }

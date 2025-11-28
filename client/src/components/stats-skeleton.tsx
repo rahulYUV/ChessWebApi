@@ -5,7 +5,7 @@ export function StatsSkeleton() {
     return (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7 w-full max-w-6xl">
             {/* Profile Card Skeleton */}
-            <Card className="col-span-2 bg-white/50 dark:bg-black/50 backdrop-blur-sm border-black/5 dark:border-white/10">
+            <Card className="col-span-1 md:col-span-2 bg-white/50 dark:bg-black/50 backdrop-blur-sm border-black/5 dark:border-white/10">
                 <CardHeader className="flex flex-col items-center gap-4">
                     <Skeleton className="h-24 w-24 rounded-full" />
                     <div className="space-y-2 text-center w-full flex flex-col items-center">
@@ -27,7 +27,7 @@ export function StatsSkeleton() {
             </Card>
 
             {/* Stats Grid Skeleton */}
-            <div className="col-span-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="col-span-1 md:col-span-2 lg:col-span-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {[1, 2, 3].map((i) => (
                     <Card key={i} className="bg-white/50 dark:bg-black/50 backdrop-blur-sm border-black/5 dark:border-white/10">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

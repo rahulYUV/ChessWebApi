@@ -199,7 +199,6 @@ app.get("/player/:id/matches", async (req: Request, res: Response) => {
         handleError(res, error);
     }
 });
-
 const getRatingHistory = async (username: string) => {
     try {
         const archives = await chessAPI.getPlayerMonthlyArchives(username);
@@ -307,39 +306,96 @@ app.get("/player/:id/insights", async (req: Request, res: Response) => {
         const monthlyArchives = archives.body.archives;
 
         if (!monthlyArchives || monthlyArchives.length === 0) {
-            return res.json({ activity: [], openings: [] });
+            return res.json({ activity: [], openings: [], dailyActivity: [] });
         }
 
-        const lastMonthUrl = monthlyArchives[monthlyArchives.length - 1];
-        const response = await fetch(lastMonthUrl);
-        const data = await response.json();
-        const games = data.games || [];
+        // Fetch last 12 months of data
+        const last12Months = monthlyArchives.slice(-12);
 
+        // Fetch in parallel
+        const gamesResults = await Promise.all(
+            last12Months.map((url: string) =>
+                fetch(url)
+                    .then(res => res.json())
+                    .catch(err => {
+                        console.error(`Error fetching archive ${url}:`, err);
+                        return { games: [] };
+                    })
+            )
+        );
+
+        const allGames = gamesResults.flatMap((data: any) => data.games || []);
+
+        // Filter for Last Month (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const lastMonthGames = allGames.filter((game: any) => new Date(game.end_time * 1000) >= thirtyDaysAgo);
+
+        // 1. Daily Activity (Last Year)
+        const dailyActivity: Record<string, number> = {};
+        allGames.forEach((game: any) => {
+            const dateObj = new Date(game.end_time * 1000);
+            const dateStr = dateObj.toISOString().split('T')[0];
+            dailyActivity[dateStr] = (dailyActivity[dateStr] || 0) + 1;
+        });
+
+        // 2. Hourly Activity (Last Month)
         const activityMap = new Array(7).fill(0).map(() => new Array(24).fill(0));
 
+        // 3. Openings & Stats (Last Month)
         const openingsCount: Record<string, { wins: number, loss: number, draw: number, total: number, color: 'white' | 'black' }> = {};
+        const colorStats = {
+            white: { wins: 0, loss: 0, draw: 0, total: 0 },
+            black: { wins: 0, loss: 0, draw: 0, total: 0 }
+        };
+        const summary = { wins: 0, loss: 0, draw: 0, total: 0 };
 
-        games.forEach((game: any) => {
-            const date = new Date(game.end_time * 1000);
-            const day = date.getDay();
-            const hour = date.getHours();
+        lastMonthGames.forEach((game: any) => {
+            const dateObj = new Date(game.end_time * 1000);
+            const day = dateObj.getDay();
+            const hour = dateObj.getHours();
+
+            // Hourly Activity
             activityMap[day][hour]++;
 
+            const isWhite = game.white.username.toLowerCase() === id.toLowerCase();
+            const result = isWhite ? game.white.result : game.black.result;
+
+            // Summary Stats
+            summary.total++;
+            if (result === 'win') summary.wins++;
+            else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) summary.loss++;
+            else summary.draw++;
+
+            // Color Stats
+            if (isWhite) {
+                colorStats.white.total++;
+                if (result === 'win') colorStats.white.wins++;
+                else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) colorStats.white.loss++;
+                else colorStats.white.draw++;
+            } else {
+                colorStats.black.total++;
+                if (result === 'win') colorStats.black.wins++;
+                else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) colorStats.black.loss++;
+                else colorStats.black.draw++;
+            }
+
+            // Openings
             if (game.pgn) {
                 const openingMatch = game.pgn.match(/\[Opening "([^"]+)"\]/);
                 if (openingMatch) {
                     const opening = openingMatch[1];
-                    const isWhite = game.white.username.toLowerCase() === id.toLowerCase();
-                    const result = isWhite ? game.white.result : game.black.result;
+                    // Group by base opening name (e.g., "Sicilian Defense") to avoid too many variations
+                    const baseOpening = opening.split(':')[0].split(',')[0];
 
-                    if (!openingsCount[opening]) {
-                        openingsCount[opening] = { wins: 0, loss: 0, draw: 0, total: 0, color: isWhite ? 'white' : 'black' };
+                    if (!openingsCount[baseOpening]) {
+                        openingsCount[baseOpening] = { wins: 0, loss: 0, draw: 0, total: 0, color: isWhite ? 'white' : 'black' };
                     }
 
-                    openingsCount[opening].total++;
-                    if (result === 'win') openingsCount[opening].wins++;
-                    else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) openingsCount[opening].loss++;
-                    else openingsCount[opening].draw++;
+                    openingsCount[baseOpening].total++;
+                    if (result === 'win') openingsCount[baseOpening].wins++;
+                    else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) openingsCount[baseOpening].loss++;
+                    else openingsCount[baseOpening].draw++;
                 }
             }
         });
@@ -354,7 +410,16 @@ app.get("/player/:id/insights", async (req: Request, res: Response) => {
             .slice(0, 10)
             .map(([name, stats]) => ({ name, ...stats }));
 
-        res.json({ activity, openings: sortedOpenings });
+        const dailyActivityArray = Object.entries(dailyActivity).map(([date, count]) => ({ date, count }));
+
+        res.json({
+            activity,
+            openings: sortedOpenings,
+            dailyActivity: dailyActivityArray,
+            colorStats,
+            summary,
+            totalGames: allGames.length
+        });
 
     } catch (error) {
         handleError(res, error);

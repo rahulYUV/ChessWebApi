@@ -182,13 +182,11 @@ export default function FloatingDockDemo({ onPlayerSelect }: FloatingDockDemoPro
     ];
 
     return (
-        <div className="flex flex-col items-center justify-center h-auto py-4 w-full gap-0">
+        <div className="flex flex-col items-center justify-center h-auto py-4 w-full gap-4">
             <FloatingDock
-                mobileClassName="translate-y-20"
                 items={links1}
             />
             <FloatingDock
-                mobileClassName="translate-y-20"
                 items={links2}
                 size="small"
             />
