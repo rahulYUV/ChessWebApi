@@ -380,7 +380,7 @@ function App() {
           </div>
 
           <div className="flex flex-col gap-2 items-end">
-            <AvatarGroupPopularityIndicatorDemo />
+
             <FeedbackForm />
           </div>
         </div>

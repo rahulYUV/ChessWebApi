@@ -45,6 +45,13 @@ export interface PlayerData {
         black: { wins: number; loss: number; draw: number; total: number };
     };
     summary?: { wins: number; loss: number; draw: number; total: number };
+    games?: {
+        pgn: string;
+        url: string;
+        white: { username: string; result: string; rating: number };
+        black: { username: string; result: string; rating: number };
+        date: number;
+    }[];
     history?: { date: string; rating: number }[];
     [key: string]: any;
 }

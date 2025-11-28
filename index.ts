@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+import NodeCache from "node-cache";
 
 import ChessWebAPI from "chess-web-api";
 
@@ -13,7 +14,9 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 const chessAPI = new ChessWebAPI();
+const cache = new NodeCache({ stdTTL: 3600 }); // Cache for 1 hour , rate limit protection 
 
+// middlewares 
 app.use(cors());
 app.use(express.json());
 
@@ -34,6 +37,19 @@ const commentSchema = new mongoose.Schema({
 });
 
 const Comment = mongoose.model("Comment", commentSchema);
+
+//  handle caching
+const getOrSetCache = async (key: string, fetchFunction: () => Promise<any>) => {
+    const cachedData = cache.get(key);
+    if (cachedData) {
+        console.log(`Cache hit for key: ${key}`);
+        return cachedData;
+    }
+    console.log(`Cache miss for key: ${key}`);
+    const data = await fetchFunction();
+    cache.set(key, data);
+    return data;
+};
 
 app.post("/comments", async (req: Request, res: Response) => {
     try {
@@ -57,6 +73,40 @@ app.post("/comments", async (req: Request, res: Response) => {
     } catch (error) {
         console.error("Error saving comment:", error);
         res.status(500).json({ error: "Failed to save comment" });
+    }
+});
+
+const visitorSchema = new mongoose.Schema({
+    count: { type: Number, default: 99 }
+});
+const Visitor = mongoose.model("Visitor", visitorSchema);
+
+app.post("/visit", async (req: Request, res: Response) => {
+    try {
+        let visitor = await Visitor.findOne();
+        if (!visitor) {
+            visitor = new Visitor({ count: 0 });
+        }
+        visitor.count++;
+        await visitor.save();
+        res.json({ count: visitor.count });
+    } catch (error) {
+        console.error("Error incrementing visitor count:", error);
+        res.status(500).json({ error: "Failed to increment visitor count" });
+    }
+});
+
+app.get("/visit", async (req: Request, res: Response) => {
+    try {
+        let visitor = await Visitor.findOne();
+        if (!visitor) {
+            visitor = new Visitor({ count: 0 });
+            await visitor.save();
+        }
+        res.json({ count: visitor.count });
+    } catch (error) {
+        console.error("Error getting visitor count:", error);
+        res.status(500).json({ error: "Failed to get visitor count" });
     }
 });
 
@@ -101,9 +151,15 @@ app.get("/", (req: Request, res: Response) => {
         }
     });
 });
-// chech all endpoints 
+
 app.get("/health", (req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Cache flush endpoint
+app.post("/cache/flush", (req: Request, res: Response) => {
+    cache.flushAll();
+    res.json({ message: "Cache flushed successfully" });
 });
 
 app.get("/player/:id", async (req: Request, res: Response) => {
@@ -112,34 +168,43 @@ app.get("/player/:id", async (req: Request, res: Response) => {
         if (!id) {
             return res.status(400).json({ error: "Player ID is required" });
         }
-        const player = await chessAPI.getPlayer(id);
-        res.json(processData(player.body));
+
+        const data = await getOrSetCache(`player-${id}`, async () => {
+            const player = await chessAPI.getPlayer(id);
+            return processData(player.body);
+        });
+
+        res.json(data);
     } catch (error) {
         handleError(res, error);
     }
 });
-// player stats 
+
 app.get("/player/:id/stats", async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         if (!id) {
             return res.status(400).json({ error: "Player ID is required" });
         }
-        const [stats, history] = await Promise.all([
-            chessAPI.getPlayerStats(id),
-            getRatingHistory(id)
-        ]);
 
-        const responseData = {
-            ...processData(stats.body),
-            history
-        };
-        res.json(responseData);
+        const data = await getOrSetCache(`stats-${id}`, async () => {
+            const [stats, history] = await Promise.all([
+                chessAPI.getPlayerStats(id),
+                getRatingHistory(id)
+            ]);
+
+            return {
+                ...processData(stats.body),
+                history
+            };
+        });
+
+        res.json(data);
     } catch (error) {
         handleError(res, error);
     }
 });
-// player full data 
+
 app.get("/player/:id/full", async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
@@ -147,28 +212,28 @@ app.get("/player/:id/full", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Player ID is required" });
         }
 
-        // player data 
-        // Fetch sequentially to avoid rate limiting
-        const player = await chessAPI.getPlayer(id);
-        const stats = await chessAPI.getPlayerStats(id);
+        const data = await getOrSetCache(`full-${id}`, async () => {
+            const player = await chessAPI.getPlayer(id);
+            const stats = await chessAPI.getPlayerStats(id);
 
-        let clubs = { body: { clubs: [] } };
-        try {
-            clubs = await chessAPI.getPlayerClubs(id);
-        } catch (e) {
-            console.warn(`Failed to fetch clubs for ${id}`, e);
-        }
+            let clubs = { body: { clubs: [] } };
+            try {
+                clubs = await chessAPI.getPlayerClubs(id);
+            } catch (e) {
+                console.warn(`Failed to fetch clubs for ${id}`, e);
+            }
 
-        const history = await getRatingHistory(id);
+            const history = await getRatingHistory(id);
 
-        const combined = {
-            ...player.body,
-            stats: stats.body,
-            clubs: clubs.body.clubs,
-            history
-        };
+            return processData({
+                ...player.body,
+                stats: stats.body,
+                clubs: clubs.body.clubs,
+                history
+            });
+        });
 
-        res.json(processData(combined));
+        res.json(data);
     } catch (error) {
         handleError(res, error);
     }
@@ -180,8 +245,13 @@ app.get("/player/:id/clubs", async (req: Request, res: Response) => {
         if (!id) {
             return res.status(400).json({ error: "Player ID is required" });
         }
-        const clubs = await chessAPI.getPlayerClubs(id);
-        res.json(processData(clubs.body));
+
+        const data = await getOrSetCache(`clubs-${id}`, async () => {
+            const clubs = await chessAPI.getPlayerClubs(id);
+            return processData(clubs.body);
+        });
+
+        res.json(data);
     } catch (error) {
         handleError(res, error);
     }
@@ -193,19 +263,25 @@ app.get("/player/:id/matches", async (req: Request, res: Response) => {
         if (!id) {
             return res.status(400).json({ error: "Player ID is required" });
         }
-        const matches = await chessAPI.getPlayerCurrentDailyChess(id);
-        res.json(processData(matches.body));
+
+        const data = await getOrSetCache(`matches-${id}`, async () => {
+            const matches = await chessAPI.getPlayerCurrentDailyChess(id);
+            return processData(matches.body);
+        });
+
+        res.json(data);
     } catch (error) {
         handleError(res, error);
     }
 });
+
 const getRatingHistory = async (username: string) => {
     try {
         const archives = await chessAPI.getPlayerMonthlyArchives(username);
         const monthlyArchives = archives.body.archives;
         if (!monthlyArchives || monthlyArchives.length === 0) return [];
 
-        // get the 12 months of data
+
         const last12 = monthlyArchives.slice(-12);
 
         const history = await Promise.all(last12.map(async (url: string) => {
@@ -213,15 +289,15 @@ const getRatingHistory = async (username: string) => {
                 const res = await fetch(url);
                 const data = await res.json();
                 const games = data.games || [];
-                // rapid games 
+
                 const rapidGames = games.filter((g: any) => g.rules === 'chess' && g.time_class === 'rapid');
                 if (rapidGames.length === 0) return null;
 
-                // last months data 
+
                 const lastGame = rapidGames[rapidGames.length - 1];
                 const isWhite = lastGame.white.username.toLowerCase() === username.toLowerCase();
                 const rating = isWhite ? lastGame.white.rating : lastGame.black.rating;
-                // Normalize date 
+
                 const dateObj = new Date(lastGame.end_time * 1000);
                 const date = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-01`;
 
@@ -245,53 +321,56 @@ app.get("/compare/:p1/:p2", async (req: Request, res: Response) => {
             return res.status(400).json({ error: "Both player IDs are required" });
         }
 
-        // Fetch sequentially to avoid rate limit
-        const p1Profile = await chessAPI.getPlayer(p1);
-        const p1Stats = await chessAPI.getPlayerStats(p1);
-        const p1History = await getRatingHistory(p1);
+        const data = await getOrSetCache(`compare-${p1}-${p2}`, async () => {
+            const p1Profile = await chessAPI.getPlayer(p1);
+            const p1Stats = await chessAPI.getPlayerStats(p1);
+            const p1History = await getRatingHistory(p1);
 
-        const p2Profile = await chessAPI.getPlayer(p2);
-        const p2Stats = await chessAPI.getPlayerStats(p2);
-        const p2History = await getRatingHistory(p2);
+            const p2Profile = await chessAPI.getPlayer(p2);
+            const p2Stats = await chessAPI.getPlayerStats(p2);
+            const p2History = await getRatingHistory(p2);
 
-        const p1Data = [p1Profile, p1Stats];
-        const p2Data = [p2Profile, p2Stats];
-
-
-        const historyMap = new Map<string, { date: string, player1?: number, player2?: number }>();
-
-        p1History.forEach((h: any) => {
-            if (!historyMap.has(h.date)) historyMap.set(h.date, { date: h.date });
-            historyMap.get(h.date)!.player1 = h.rating;
-        });
-
-        p2History.forEach((h: any) => {
-            if (!historyMap.has(h.date)) historyMap.set(h.date, { date: h.date });
-            historyMap.get(h.date)!.player2 = h.rating;
-        });
-
-        const mergedHistory = Array.from(historyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+            const p1Data = [p1Profile, p1Stats];
+            const p2Data = [p2Profile, p2Stats];
 
 
-        let lastP1: number | undefined = undefined;
-        let lastP2: number | undefined = undefined;
+            const historyMap = new Map<string, { date: string, player1?: number, player2?: number }>();
 
-        const filledHistory = mergedHistory.map(entry => {
-            if (entry.player1 !== undefined) lastP1 = entry.player1;
-            if (entry.player2 !== undefined) lastP2 = entry.player2;
+            p1History.forEach((h: any) => {
+                if (!historyMap.has(h.date)) historyMap.set(h.date, { date: h.date });
+                historyMap.get(h.date)!.player1 = h.rating;
+            });
+
+            p2History.forEach((h: any) => {
+                if (!historyMap.has(h.date)) historyMap.set(h.date, { date: h.date });
+                historyMap.get(h.date)!.player2 = h.rating;
+            });
+
+            const mergedHistory = Array.from(historyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+
+            let lastP1: number | undefined = undefined;
+            let lastP2: number | undefined = undefined;
+
+            const filledHistory = mergedHistory.map(entry => {
+                if (entry.player1 !== undefined) lastP1 = entry.player1;
+                if (entry.player2 !== undefined) lastP2 = entry.player2;
+
+                return {
+                    date: entry.date,
+                    player1: entry.player1 !== undefined ? entry.player1 : lastP1,
+                    player2: entry.player2 !== undefined ? entry.player2 : lastP2
+                };
+            });
 
             return {
-                date: entry.date,
-                player1: entry.player1 !== undefined ? entry.player1 : lastP1,
-                player2: entry.player2 !== undefined ? entry.player2 : lastP2
+                player1: { ...processData(p1Data[0].body), stats: processData(p1Data[1].body) },
+                player2: { ...processData(p2Data[0].body), stats: processData(p2Data[1].body) },
+                history: filledHistory
             };
         });
 
-        res.json({
-            player1: { ...processData(p1Data[0].body), stats: processData(p1Data[1].body) },
-            player2: { ...processData(p2Data[0].body), stats: processData(p2Data[1].body) },
-            history: filledHistory
-        });
+        res.json(data);
     } catch (error) {
         handleError(res, error);
     }
@@ -302,124 +381,138 @@ app.get("/player/:id/insights", async (req: Request, res: Response) => {
         const { id } = req.params;
         if (!id) return res.status(400).json({ error: "Player ID is required" });
 
-        const archives = await chessAPI.getPlayerMonthlyArchives(id);
-        const monthlyArchives = archives.body.archives;
+        const data = await getOrSetCache(`insights-${id}`, async () => {
+            const archives = await chessAPI.getPlayerMonthlyArchives(id);
+            const monthlyArchives = archives.body.archives;
 
-        if (!monthlyArchives || monthlyArchives.length === 0) {
-            return res.json({ activity: [], openings: [], dailyActivity: [] });
-        }
-
-        // Fetch last 12 months of data
-        const last12Months = monthlyArchives.slice(-12);
-
-        // Fetch in parallel
-        const gamesResults = await Promise.all(
-            last12Months.map((url: string) =>
-                fetch(url)
-                    .then(res => res.json())
-                    .catch(err => {
-                        console.error(`Error fetching archive ${url}:`, err);
-                        return { games: [] };
-                    })
-            )
-        );
-
-        const allGames = gamesResults.flatMap((data: any) => data.games || []);
-
-        // Filter for Last Month (last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const lastMonthGames = allGames.filter((game: any) => new Date(game.end_time * 1000) >= thirtyDaysAgo);
-
-        // 1. Daily Activity (Last Year)
-        const dailyActivity: Record<string, number> = {};
-        allGames.forEach((game: any) => {
-            const dateObj = new Date(game.end_time * 1000);
-            const dateStr = dateObj.toISOString().split('T')[0];
-            dailyActivity[dateStr] = (dailyActivity[dateStr] || 0) + 1;
-        });
-
-        // 2. Hourly Activity (Last Month)
-        const activityMap = new Array(7).fill(0).map(() => new Array(24).fill(0));
-
-        // 3. Openings & Stats (Last Month)
-        const openingsCount: Record<string, { wins: number, loss: number, draw: number, total: number, color: 'white' | 'black' }> = {};
-        const colorStats = {
-            white: { wins: 0, loss: 0, draw: 0, total: 0 },
-            black: { wins: 0, loss: 0, draw: 0, total: 0 }
-        };
-        const summary = { wins: 0, loss: 0, draw: 0, total: 0 };
-
-        lastMonthGames.forEach((game: any) => {
-            const dateObj = new Date(game.end_time * 1000);
-            const day = dateObj.getDay();
-            const hour = dateObj.getHours();
-
-            // Hourly Activity
-            activityMap[day][hour]++;
-
-            const isWhite = game.white.username.toLowerCase() === id.toLowerCase();
-            const result = isWhite ? game.white.result : game.black.result;
-
-            // Summary Stats
-            summary.total++;
-            if (result === 'win') summary.wins++;
-            else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) summary.loss++;
-            else summary.draw++;
-
-            // Color Stats
-            if (isWhite) {
-                colorStats.white.total++;
-                if (result === 'win') colorStats.white.wins++;
-                else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) colorStats.white.loss++;
-                else colorStats.white.draw++;
-            } else {
-                colorStats.black.total++;
-                if (result === 'win') colorStats.black.wins++;
-                else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) colorStats.black.loss++;
-                else colorStats.black.draw++;
+            if (!monthlyArchives || monthlyArchives.length === 0) {
+                return { activity: [], openings: [], dailyActivity: [] };
             }
 
-            // Openings
-            if (game.pgn) {
-                const openingMatch = game.pgn.match(/\[Opening "([^"]+)"\]/);
-                if (openingMatch) {
-                    const opening = openingMatch[1];
-                    // Group by base opening name (e.g., "Sicilian Defense") to avoid too many variations
-                    const baseOpening = opening.split(':')[0].split(',')[0];
 
-                    if (!openingsCount[baseOpening]) {
-                        openingsCount[baseOpening] = { wins: 0, loss: 0, draw: 0, total: 0, color: isWhite ? 'white' : 'black' };
-                    }
+            const last12Months = monthlyArchives.slice(-12);
 
-                    openingsCount[baseOpening].total++;
-                    if (result === 'win') openingsCount[baseOpening].wins++;
-                    else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) openingsCount[baseOpening].loss++;
-                    else openingsCount[baseOpening].draw++;
+
+            const gamesResults = await Promise.all(
+                last12Months.map((url: string) =>
+                    fetch(url)
+                        .then(res => res.json())
+                        .catch(err => {
+                            console.error(`Error fetching archive ${url}:`, err);
+                            return { games: [] };
+                        })
+                )
+            );
+
+            const allGames = gamesResults.flatMap((data: any) => data.games || []);
+
+
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            const lastMonthGames = allGames.filter((game: any) => new Date(game.end_time * 1000) >= thirtyDaysAgo);
+
+
+            const dailyActivity: Record<string, number> = {};
+            allGames.forEach((game: any) => {
+                const dateObj = new Date(game.end_time * 1000);
+                const dateStr = dateObj.toISOString().split('T')[0];
+                dailyActivity[dateStr] = (dailyActivity[dateStr] || 0) + 1;
+            });
+
+
+            const activityMap = new Array(7).fill(0).map(() => new Array(24).fill(0));
+
+
+            const openingsCount: Record<string, { wins: number, loss: number, draw: number, total: number, color: 'white' | 'black' }> = {};
+            const colorStats = {
+                white: { wins: 0, loss: 0, draw: 0, total: 0 },
+                black: { wins: 0, loss: 0, draw: 0, total: 0 }
+            };
+            const summary = { wins: 0, loss: 0, draw: 0, total: 0 };
+
+            lastMonthGames.forEach((game: any) => {
+                const dateObj = new Date(game.end_time * 1000);
+                const day = dateObj.getDay();
+                const hour = dateObj.getHours();
+
+
+                activityMap[day][hour]++;
+
+                const isWhite = game.white.username.toLowerCase() === id.toLowerCase();
+                const result = isWhite ? game.white.result : game.black.result;
+
+
+                summary.total++;
+                if (result === 'win') summary.wins++;
+                else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) summary.loss++;
+                else summary.draw++;
+
+
+                if (isWhite) {
+                    colorStats.white.total++;
+                    if (result === 'win') colorStats.white.wins++;
+                    else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) colorStats.white.loss++;
+                    else colorStats.white.draw++;
+                } else {
+                    colorStats.black.total++;
+                    if (result === 'win') colorStats.black.wins++;
+                    else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) colorStats.black.loss++;
+                    else colorStats.black.draw++;
                 }
-            }
+
+
+                if (game.pgn) {
+                    const openingMatch = game.pgn.match(/\[Opening "([^"]+)"\]/);
+                    if (openingMatch) {
+                        const opening = openingMatch[1];
+
+                        const baseOpening = opening.split(':')[0].split(',')[0];
+
+                        if (!openingsCount[baseOpening]) {
+                            openingsCount[baseOpening] = { wins: 0, loss: 0, draw: 0, total: 0, color: isWhite ? 'white' : 'black' };
+                        }
+
+                        openingsCount[baseOpening].total++;
+                        if (result === 'win') openingsCount[baseOpening].wins++;
+                        else if (['checkmated', 'resigned', 'timeout', 'abandoned'].includes(result)) openingsCount[baseOpening].loss++;
+                        else openingsCount[baseOpening].draw++;
+                    }
+                }
+            });
+
+            const activity = activityMap.map((hours, day) => ({
+                day,
+                hours: hours.map((count, hour) => ({ hour, count }))
+            }));
+
+            const sortedOpenings = Object.entries(openingsCount)
+                .sort(([, a], [, b]) => b.total - a.total)
+                .slice(0, 10)
+                .map(([name, stats]) => ({ name, ...stats }));
+
+            const dailyActivityArray = Object.entries(dailyActivity).map(([date, count]) => ({ date, count }));
+
+            const gamesForExplorer = lastMonthGames.map((g: any) => ({
+                pgn: g.pgn,
+                url: g.url,
+                white: { username: g.white.username, result: g.white.result, rating: g.white.rating },
+                black: { username: g.black.username, result: g.black.result, rating: g.black.rating },
+                date: g.end_time
+            }));
+
+            return {
+                username: id,
+                activity,
+                openings: sortedOpenings,
+                dailyActivity: dailyActivityArray,
+                colorStats,
+                summary,
+                totalGames: allGames.length,
+                games: gamesForExplorer
+            };
         });
 
-        const activity = activityMap.map((hours, day) => ({
-            day,
-            hours: hours.map((count, hour) => ({ hour, count }))
-        }));
-
-        const sortedOpenings = Object.entries(openingsCount)
-            .sort(([, a], [, b]) => b.total - a.total)
-            .slice(0, 10)
-            .map(([name, stats]) => ({ name, ...stats }));
-
-        const dailyActivityArray = Object.entries(dailyActivity).map(([date, count]) => ({ date, count }));
-
-        res.json({
-            activity,
-            openings: sortedOpenings,
-            dailyActivity: dailyActivityArray,
-            colorStats,
-            summary,
-            totalGames: allGames.length
-        });
+        res.json(data);
 
     } catch (error) {
         handleError(res, error);
